@@ -1,0 +1,48 @@
+service: step-functions-demo
+
+plugins:
+  - serverless-iam-roles-per-function
+  - serverless-step-functions
+  - serverless-esbuild
+  - serverless-lift
+
+package:
+  individually: true
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+
+functions:
+  - ${file(functions.yml)}
+
+stepFunctions: ${file(step-functions.yml)}
+
+constructs: ${file(sqs.yml)}
+
+resources:
+  Resources:
+    MyParam:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: /path/to/myParam
+        Type: String
+        Value: 'Hello world!'
+    SdkIntegrationRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: !Sub 'states.${AWS::Region}.amazonaws.com'
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: 'step-functions-ssm-access'
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ssm:GetParameter
+                  Resource:
+                    - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/path/to/myParam'

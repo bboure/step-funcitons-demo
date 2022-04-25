@@ -1,0 +1,11 @@
+notifyAdmin:
+  handler: src/functions/notifyAdmin.handler
+
+processOrder:
+  handler: src/functions/processOrder.handler
+
+fulfillOrder:
+  handler: src/functions/fulfillOrder.handler
+
+alwaysFails:
+  handler: src/functions/alwaysFails.handler

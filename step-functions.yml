@@ -1,0 +1,246 @@
+stateMachines:
+  process-order:
+    id: ProcessOrder
+    name: process-order
+    definition:
+      StartAt: WaitForAprobation
+      TimeoutSeconds: 604800
+      States:
+        WaitForAprobation:
+          Type: Task
+          Resource: arn:aws:states:::lambda:invoke.waitForTaskToken
+          Parameters:
+            FunctionName: ${self:service}-${sls:stage}-notifyAdmin
+            Payload:
+              order.$: $$.Execution.Input
+              token.$: $$.Task.Token
+          ResultPath: $.aprobation
+          Next: Accepted
+
+        Accepted:
+          Type: Choice
+          Choices:
+            - Variable: $.aprobation.decision
+              StringEquals: Accepted
+              Next: ProcessOrder
+            - Variable: $.aprobation.decision
+              StringEquals: Rejected
+              Next: Finish
+
+        ProcessOrder:
+          Type: Task
+          Resource: arn:aws:states:::lambda:invoke
+          Parameters:
+            FunctionName: ${self:service}-${sls:stage}-processOrder
+            Payload:
+              order.$: $$.Execution.Input
+          Next: Finish
+
+        Finish:
+          Type: Succeed
+
+  sqs-callabck:
+    id: SqsCallBack
+    name: sqs-callback
+    definition:
+      StartAt: SendToQueue
+      TimeoutSeconds: 604800
+      States:
+        SendToQueue:
+          Type: Task
+          Resource: arn:aws:states:::sqs:sendMessage.waitForTaskToken
+          Parameters:
+            QueueUrl: ${construct:processPayment.queueUrl}
+            MessageGroupId: 'payment'
+            MessageBody:
+              order.$: $$.Execution.Input.order
+              token.$: $$.Task.Token
+
+          ResultPath: $.payment
+          Next: FulfillOrder
+
+        FulfillOrder:
+          Type: Task
+          Resource: arn:aws:states:::lambda:invoke
+          Parameters:
+            FunctionName: ${self:service}-${sls:stage}-fulfillOrder
+            Payload:
+              order.$: $$.Execution.Input
+              payment.$: $.payment
+          Next: Finish
+
+        Finish:
+          Type: Succeed
+
+  parallel:
+    id: Parallel
+    name: parallel
+    definition:
+      StartAt: Begin
+      TimeoutSeconds: 604800
+      States:
+        Begin:
+          Type: Parallel
+          Branches:
+            - StartAt: One
+              States:
+                One:
+                  Type: Pass
+                  Next: Two
+                Two:
+                  Type: Pass
+                  End: true
+            - StartAt: Three
+              States:
+                Three:
+                  Type: Pass
+                  Next: Four
+                Four:
+                  Type: Wait
+                  Seconds: 30
+                  Next: Five
+                Five:
+                  Type: Pass
+                  End: true
+          End: true
+
+  wait:
+    id: Wait
+    name: wait
+    definition:
+      StartAt: One
+      TimeoutSeconds: 604800
+      States:
+        One:
+          Type: Pass
+          Next: Wait
+        Wait:
+          Type: Wait
+          Next: Three
+          Seconds: 30
+        Three:
+          Type: Pass
+          End: true
+
+  pass:
+    id: Pass
+    name: pass
+    definition:
+      StartAt: Pass
+      TimeoutSeconds: 604800
+      States:
+        Pass:
+          Type: Pass
+          End: true
+
+  map:
+    id: Map
+    name: map
+    definition:
+      StartAt: Map
+      TimeoutSeconds: 604800
+      States:
+        Map:
+          Type: Map
+          Iterator:
+            StartAt: One
+            States:
+              One:
+                Type: Pass
+                Next: Two
+              Two:
+                Type: Pass
+                End: true
+          End: true
+
+  choice:
+    id: Choice
+    name: choice
+    definition:
+      StartAt: Chose
+      TimeoutSeconds: 604800
+      States:
+        Chose:
+          Type: Choice
+          Choices:
+            - Variable: $.input
+              NumericGreaterThan: 500
+              Next: GreaterThan500
+            - Variable: $.input
+              NumericGreaterThan: 50
+              Next: GreaterThan50
+          Default: LessOrEquals50
+        GreaterThan500:
+          Type: Pass
+          End: true
+        GreaterThan50:
+          Type: Pass
+          End: true
+        LessOrEquals50:
+          Type: Pass
+          End: true
+
+  successFail:
+    id: SuccedsFail
+    name: successFail
+    definition:
+      StartAt: Chose
+      TimeoutSeconds: 604800
+      States:
+        Chose:
+          Type: Choice
+          Choices:
+            - Variable: $.input
+              NumericGreaterThan: 50
+              Next: Succeed
+          Default: Fail
+        Succeed:
+          Type: Succeed
+        Fail:
+          Type: Fail
+
+  sdk-integration:
+    id: SdkIntegration
+    name: sdk-integration
+    role: !GetAtt SdkIntegrationRole.Arn
+    definition:
+      StartAt: GetSsmParam
+      TimeoutSeconds: 604800
+      States:
+        GetSsmParam:
+          Type: Task
+          Resource: arn:aws:states:::aws-sdk:ssm:getParameter
+          Parameters:
+            Name: /path/to/myParam
+          ResultSelector:
+            myParam.$: $.Parameter.Value
+          ResultPath: $.variables
+          End: true
+
+  errorHandling:
+    id: ErrorHandler
+    name: ErrorHandler
+    definition:
+      StartAt: Begin
+      States:
+        Begin:
+          Type: Task
+          Resource: !GetAtt AlwaysFailsLambdaFunction.Arn
+          Retry:
+            - ErrorEquals:
+                - States.ALL
+              IntervalSeconds: 5
+              BackoffRate: 2
+              MaxAttempts: 2
+          Catch:
+            - ErrorEquals:
+                - States.ALL
+              Next: HandleError
+              ResultPath: $.error
+          End: true
+        HandleError:
+          Type: Pass
+          Parameters:
+            Cause.$: States.StringToJson($.error.Cause)
+          ResultPath: $.error
+          End: true
