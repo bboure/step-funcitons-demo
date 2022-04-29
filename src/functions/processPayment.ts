@@ -16,6 +16,7 @@ export const handler: SQSHandler = async (event) => {
     body: body.order,
   });
 
+  console.log({ data });
   if (data.status === 'Success') {
     await client.send(
       new SendTaskSuccessCommand({

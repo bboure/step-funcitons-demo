@@ -13,4 +13,4 @@ processPayment:
           - states:SendTaskSuccess
           - states:SendTaskFailure
         Resource:
-          - !Ref SqsCallBack
+          - !Ref ProcessPayment
